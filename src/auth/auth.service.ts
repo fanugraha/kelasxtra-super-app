@@ -3,10 +3,13 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditLogService } from '../common/services/audit-log.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 const REFRESH_TOKEN_TTL_DAYS = 7;
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MINUTES = 15;
 
 @Injectable()
 export class AuthService {
@@ -14,6 +17,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private prisma: PrismaService,
+    private auditLog: AuditLogService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -39,6 +43,8 @@ export class AuthService {
             name: registerDto.name,
           });
 
+    await this.auditLog.record('REGISTER', newUser.id, { email: newUser.email, role: role });
+
     return this.issueTokenPair(newUser.id, newUser.email, newUser.role.name);
   }
 
@@ -49,11 +55,35 @@ export class AuthService {
       throw new UnauthorizedException('Email atau password salah.');
     }
 
+    // Suspend/deactivate harus efektif dari titik login juga (bukan cuma
+    // dicek ulang di JwtStrategy untuk request yang sudah punya token).
+    if (existingUser.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Akun tidak aktif. Hubungi admin.');
+    }
+
+    if (existingUser.lockedUntil && existingUser.lockedUntil > new Date()) {
+      throw new UnauthorizedException(
+        `Akun terkunci sementara karena terlalu banyak percobaan login gagal. Coba lagi setelah ${existingUser.lockedUntil.toISOString()}.`,
+      );
+    }
+
     const isPasswordCorrect = await bcrypt.compare(loginDto.password, existingUser.password);
 
     if (!isPasswordCorrect) {
+      await this.registerFailedLoginAttempt(existingUser.id, existingUser.failedLoginAttempts);
+      await this.auditLog.record('LOGIN_FAILED', existingUser.id, { email: existingUser.email });
       throw new UnauthorizedException('Email atau password salah.');
     }
+
+    // Login sukses: reset counter lockout.
+    if (existingUser.failedLoginAttempts > 0 || existingUser.lockedUntil) {
+      await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+    }
+
+    await this.auditLog.record('LOGIN_SUCCESS', existingUser.id, { email: existingUser.email });
 
     return this.issueTokenPair(existingUser.id, existingUser.email, existingUser.role.name);
   }
@@ -101,6 +131,7 @@ export class AuthService {
         where: { id: matchingRecord.id },
         data: { revoked: true },
       });
+      await this.auditLog.record('LOGOUT', payload.sub);
     }
 
     return { loggedOut: true };
@@ -113,8 +144,33 @@ export class AuthService {
       throw new UnauthorizedException('User tidak ditemukan.');
     }
 
-    const { password: _password, ...safeUser } = user;
+    // password sudah wajib di-strip; failedLoginAttempts/lockedUntil adalah
+    // detail internal lockout tracking yang juga tidak boleh bocor ke client.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _password, failedLoginAttempts: _fla, lockedUntil: _lu, ...safeUser } = user;
     return safeUser;
+  }
+
+  private async registerFailedLoginAttempt(userId: number, currentAttempts: number) {
+    const nextAttempts = currentAttempts + 1;
+
+    if (nextAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+      const lockedUntil = new Date();
+      lockedUntil.setMinutes(lockedUntil.getMinutes() + LOCKOUT_DURATION_MINUTES);
+
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { failedLoginAttempts: nextAttempts, lockedUntil },
+      });
+
+      await this.auditLog.record('ACCOUNT_LOCKED', userId, { untilIso: lockedUntil.toISOString() });
+      return;
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: nextAttempts },
+    });
   }
 
   private async findMatchingActiveRefreshToken(userId: number, rawToken: string) {

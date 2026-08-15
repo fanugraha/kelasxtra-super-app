@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -6,6 +6,7 @@ export class RegisterDto {
 
   @IsString()
   @MinLength(6)
+  @MaxLength(72) // batas byte yang benar-benar dipakai bcrypt; sisanya diam-diam diabaikan
   password!: string;
 
   @IsString()

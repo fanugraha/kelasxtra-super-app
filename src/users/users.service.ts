@@ -52,16 +52,15 @@ export class UsersService {
       throw new Error('Role TEACHER belum ada di database. Jalankan seed role terlebih dahulu.');
     }
 
-    // Catatan: TeacherProfile belum punya kolom `name` di schema.
-    // name dari DTO belum tersimpan di mana pun untuk teacher — perlu keputusan
-    // skema lebih lanjut (tambah kolom name di User atau di TeacherProfile).
     return this.prisma.user.create({
       data: {
         email: data.email,
         password: data.hashedPassword,
         roleId: teacherRole.id,
         teacherProfile: {
-          create: {},
+          create: {
+            name: data.name,
+          },
         },
       },
       include: { role: true, teacherProfile: true },

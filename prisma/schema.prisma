@@ -34,6 +34,8 @@ model User {
   password  String
   roleId    Int
   status    String   @default("ACTIVE") // ACTIVE, SUSPENDED, DEACTIVATED
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -41,6 +43,7 @@ model User {
   studentProfile StudentProfile?
   teacherProfile TeacherProfile?
   refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
 
   @@index([roleId])
   @@map("users")
@@ -58,6 +61,20 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  action    String // REGISTER, LOGIN_SUCCESS, LOGIN_FAILED, ACCOUNT_LOCKED, LOGOUT
+  metadata  String?  @db.Text // JSON-encoded free-form context (email, ip, dst.)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
 }
 
 // ============================================================
@@ -145,6 +162,7 @@ model TeacherProfile {
   id                 Int      @id @default(autoincrement())
   userId             Int      @unique
   teacherCode        String?  @unique
+  name               String
   bio                String?  @db.Text
   education          String?
   experienceYears    Int?

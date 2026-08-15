@@ -1,11 +1,13 @@
 import {
   ArgumentsHost,
   Catch,
+  ConflictException,
   ExceptionFilter,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { Prisma } from '../../../generated/prisma/client';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -13,12 +15,23 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    const isHttpException = exception instanceof HttpException;
+    // Race condition pada uniqueness check (findUnique lalu create) bisa
+    // lolos pengecekan aplikasi tapi tetap gagal di level MySQL unique
+    // constraint. Tanpa ini, error itu jatuh ke cabang 500 generic di bawah
+    // padahal seharusnya 409 Conflict — berlaku otomatis untuk semua module
+    // (subjects, competencies, topics, dst.), bukan cuma yang sudah
+    // ditangani manual per-service.
+    const normalizedException =
+      exception instanceof Prisma.PrismaClientKnownRequestError && exception.code === 'P2002'
+        ? new ConflictException('Data dengan nilai unik ini sudah ada.')
+        : exception;
+
+    const isHttpException = normalizedException instanceof HttpException;
     const status = isHttpException
-      ? exception.getStatus()
+      ? normalizedException.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const exceptionResponse = isHttpException ? exception.getResponse() : null;
+    const exceptionResponse = isHttpException ? normalizedException.getResponse() : null;
 
     let message: string;
     let errors: string[] = [];
