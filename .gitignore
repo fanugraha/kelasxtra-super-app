@@ -63,3 +63,7 @@ skills-lock.json
 
 # Backup files
 *.bak
+
+# AI editor skill symlinks (Claude Code, Windsurf, dll)
+/.claude
+/.windsurf
