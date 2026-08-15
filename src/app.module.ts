@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -13,6 +15,18 @@ import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
+    // Rate limit default: 100 request/menit per IP (section 14 dokumen
+    // master: "Endpoint sensitif harus memiliki validation dan rate
+    // limiting"). Endpoint yang lebih sensitif (register/login) sudah
+    // punya limit lebih ketat lewat @Throttle({...}) di AuthController —
+    // tapi decorator itu baru benar-benar berlaku setelah ThrottlerGuard
+    // didaftarkan sebagai APP_GUARD global di bawah.
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
     CommonModule,
     PrismaModule,
     UsersModule,
@@ -24,6 +38,12 @@ import { CommonModule } from './common/common.module';
     CompetenciesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
