@@ -16,7 +16,7 @@ export class AuthService {
     private prisma: PrismaService,
   ) {}
 
-  async registerNewStudent(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto) {
     const existingUser = await this.usersService.findUserByEmail(registerDto.email);
 
     if (existingUser) {
@@ -24,12 +24,20 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
+    const role = registerDto.role ?? 'STUDENT';
 
-    const newUser = await this.usersService.createStudentUser({
-      email: registerDto.email,
-      hashedPassword,
-      name: registerDto.name,
-    });
+    const newUser =
+      role === 'TEACHER'
+        ? await this.usersService.createTeacherUser({
+            email: registerDto.email,
+            hashedPassword,
+            name: registerDto.name,
+          })
+        : await this.usersService.createStudentUser({
+            email: registerDto.email,
+            hashedPassword,
+            name: registerDto.name,
+          });
 
     return this.issueTokenPair(newUser.id, newUser.email, newUser.role.name);
   }
@@ -67,7 +75,6 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token tidak dikenali atau sudah dicabut.');
     }
 
-    // Rotasi: cabut token lama, terbitkan pasangan token baru.
     await this.prisma.refreshToken.update({
       where: { id: matchingRecord.id },
       data: { revoked: true },
@@ -84,7 +91,6 @@ export class AuthService {
         secret: process.env.JWT_REFRESH_SECRET,
       });
     } catch {
-      // Token sudah invalid/expired: anggap saja logout berhasil (tidak ada yang perlu dicabut).
       return { loggedOut: true };
     }
 
@@ -107,7 +113,6 @@ export class AuthService {
       throw new UnauthorizedException('User tidak ditemukan.');
     }
 
-    // Jangan pernah kirim password_hash ke client.
     const { password: _password, ...safeUser } = user;
     return safeUser;
   }

@@ -13,7 +13,7 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() registerDto: RegisterDto) {
-    const tokens = await this.authService.registerNewStudent(registerDto);
+    const tokens = await this.authService.register(registerDto);
     return {
       success: true,
       data: tokens,

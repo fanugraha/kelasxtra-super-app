@@ -8,19 +8,18 @@ export class UsersService {
   async findUserByEmail(email: string) {
     return this.prisma.user.findUnique({
       where: { email },
-      include: { role: true, studentProfile: true },
+      include: { role: true, studentProfile: true, teacherProfile: true },
     });
   }
 
   async findUserById(userId: number) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      include: { role: true, studentProfile: true },
+      include: { role: true, studentProfile: true, teacherProfile: true },
     });
   }
 
   async createStudentUser(data: { email: string; hashedPassword: string; name: string }) {
-    // Setiap user baru yang register otomatis jadi role STUDENT
     const studentRole = await this.prisma.role.findUnique({
       where: { name: 'STUDENT' },
     });
@@ -41,6 +40,31 @@ export class UsersService {
         },
       },
       include: { role: true, studentProfile: true },
+    });
+  }
+
+  async createTeacherUser(data: { email: string; hashedPassword: string; name: string }) {
+    const teacherRole = await this.prisma.role.findUnique({
+      where: { name: 'TEACHER' },
+    });
+
+    if (!teacherRole) {
+      throw new Error('Role TEACHER belum ada di database. Jalankan seed role terlebih dahulu.');
+    }
+
+    // Catatan: TeacherProfile belum punya kolom `name` di schema.
+    // name dari DTO belum tersimpan di mana pun untuk teacher — perlu keputusan
+    // skema lebih lanjut (tambah kolom name di User atau di TeacherProfile).
+    return this.prisma.user.create({
+      data: {
+        email: data.email,
+        password: data.hashedPassword,
+        roleId: teacherRole.id,
+        teacherProfile: {
+          create: {},
+        },
+      },
+      include: { role: true, teacherProfile: true },
     });
   }
 }
