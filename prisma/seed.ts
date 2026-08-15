@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import * as bcrypt from 'bcrypt';
@@ -7,15 +6,15 @@ const ADMIN_SEED_EMAIL = 'admin@kelasxtra.test';
 const ADMIN_SEED_PASSWORD = 'admin12345';
 
 async function runSeed() {
-  const databaseUrl = process.env.DATABASE_URL;
+  const adapter = new PrismaMariaDb({
+    host: 'localhost',
+    port: 3306,
+    user: 'root',
+    password: process.env.DB_PASSWORD || 'qwerty123',
+    database: 'education_app',
+    connectionLimit: 5,
+  });
 
-  if (!databaseUrl) {
-    throw new Error(
-      'DATABASE_URL belum di-set di .env. Seed tidak boleh fallback ke kredensial hardcoded.',
-    );
-  }
-
-  const adapter = new PrismaMariaDb(databaseUrl);
   const prisma = new PrismaClient({ adapter });
 
   // TEACHER sempat ketinggalan dari list ini sebelumnya — itu penyebab
