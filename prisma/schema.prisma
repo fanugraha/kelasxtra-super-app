@@ -1,5 +1,9 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// Struktur ini mengikuti ERD konseptual & Database Table Specification
+// pada KelasXtra Master Product & Technical Documentation (section 9 & 10).
+// V1 scope only (STUDENT + TEACHER + ADMIN core learning engine).
 
 generator client {
   provider     = "prisma-client"
@@ -11,9 +15,13 @@ datasource db {
   provider = "mysql"
 }
 
+// ============================================================
+// 10.1 IDENTITY & ACCESS
+// ============================================================
+
 model Role {
-  id    Int    @id @default(autoincrement())
-  name  String @unique // STUDENT, ADMIN, PARENT, TUTOR, PROFESSIONAL
+  id   Int    @id @default(autoincrement())
+  name String @unique // STUDENT, ADMIN, PARENT, TUTOR, PROFESSIONAL
 
   users User[]
 
@@ -25,28 +33,556 @@ model User {
   email     String   @unique
   password  String
   roleId    Int
+  status    String   @default("ACTIVE") // ACTIVE, SUSPENDED, DEACTIVATED
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   role           Role            @relation(fields: [roleId], references: [id])
   studentProfile StudentProfile?
+  teacherProfile TeacherProfile?
+  refreshTokens  RefreshToken[]
 
   @@index([roleId])
   @@map("users")
 }
 
-model StudentProfile {
-  id              Int      @id @default(autoincrement())
-  userId          Int      @unique
-  name            String
-  school          String?
-  grade           String?
-  graduationYear  Int?
-  phone           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tokenHash String   @unique
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// 10.2 STUDENT
+// ============================================================
+
+model StudentProfile {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
+  studentCode    String?  @unique
+  name           String
+  school         String?
+  grade          String? // grade_level
+  graduationYear Int?
+  phone          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id])
+  goals        StudentGoal[]
+  preference   StudentPreference?
+  competencies StudentCompetency[]
+  diagnosticAttempts  DiagnosticAttempt[]
+  assessmentAttempts  AssessmentAttempt[]
+  progress     StudentProgress[]
+  learningPaths LearningPath[]
+
   @@map("student_profiles")
+}
+
+model StudentGoal {
+  id         Int       @id @default(autoincrement())
+  studentId  Int
+  goalType   String
+  targetValue String?
+  targetDate DateTime?
+  priority   Int       @default(0)
+  status     String    @default("ACTIVE") // ACTIVE, ACHIEVED, CANCELLED
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  student       StudentProfile @relation(fields: [studentId], references: [id])
+  learningPaths LearningPath[]
+
+  @@index([studentId])
+  @@map("student_goals")
+}
+
+model StudentPreference {
+  id                  Int      @id @default(autoincrement())
+  studentId           Int      @unique
+  language            String   @default("id")
+  learningPreferences String?  @db.Text // JSON-encoded free-form preferences
+  dailyTargetMinutes  Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id])
+
+  @@map("student_preferences")
+}
+
+model StudentCompetency {
+  id              Int      @id @default(autoincrement())
+  studentId       Int
+  competencyId    Int
+  masteryScore    Decimal  @default(0) @db.Decimal(5, 2)
+  confidenceScore Decimal? @db.Decimal(5, 2)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  student    StudentProfile @relation(fields: [studentId], references: [id])
+  competency Competency     @relation(fields: [competencyId], references: [id])
+
+  @@unique([studentId, competencyId])
+  @@index([competencyId])
+  @@map("student_competencies")
+}
+
+// ============================================================
+// 10.3 TEACHER
+// ============================================================
+
+model TeacherProfile {
+  id                 Int      @id @default(autoincrement())
+  userId             Int      @unique
+  teacherCode        String?  @unique
+  bio                String?  @db.Text
+  education          String?
+  experienceYears    Int?
+  verificationStatus String   @default("PENDING") // PENDING, VERIFIED, REJECTED
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user            User                   @relation(fields: [userId], references: [id])
+  skills          TeacherSkill[]
+  certifications  TeacherCertification[]
+  courses         Course[]
+  questionBanks   QuestionBank[]
+  assessments     Assessment[]
+
+  @@map("teachers")
+}
+
+model TeacherSkill {
+  id                Int      @id @default(autoincrement())
+  teacherId         Int
+  competencyId      Int
+  proficiencyLevel  String // BASIC, INTERMEDIATE, ADVANCED, EXPERT
+  createdAt         DateTime @default(now())
+
+  teacher    TeacherProfile @relation(fields: [teacherId], references: [id])
+  competency Competency     @relation(fields: [competencyId], references: [id])
+
+  @@unique([teacherId, competencyId])
+  @@index([competencyId])
+  @@map("teacher_skills")
+}
+
+model TeacherCertification {
+  id                 Int       @id @default(autoincrement())
+  teacherId          Int
+  name               String
+  issuer             String?
+  issuedAt           DateTime?
+  verificationStatus String    @default("PENDING") // PENDING, VERIFIED, REJECTED
+  createdAt          DateTime  @default(now())
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id])
+
+  @@index([teacherId])
+  @@map("teacher_certifications")
+}
+
+// ============================================================
+// 10.4 ACADEMIC STRUCTURE
+// ============================================================
+
+model Subject {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique
+  name       String
+  gradeLevel String?
+  status     String   @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  topics         Topic[]
+  competencies   Competency[]
+  courses        Course[]
+  questionBanks  QuestionBank[]
+  diagnosticTests DiagnosticTest[]
+  assessments    Assessment[]
+
+  @@map("subjects")
+}
+
+model Topic {
+  id        Int      @id @default(autoincrement())
+  subjectId Int
+  name      String
+  sequence  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subject      Subject      @relation(fields: [subjectId], references: [id])
+  competencies Competency[]
+  lessons      Lesson[]
+  questionBanks QuestionBank[]
+
+  @@index([subjectId])
+  @@map("topics")
+}
+
+model Competency {
+  id         Int      @id @default(autoincrement())
+  subjectId  Int
+  topicId    Int?
+  code       String   @unique
+  name       String
+  gradeLevel String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  subject             Subject               @relation(fields: [subjectId], references: [id])
+  topic                Topic?               @relation(fields: [topicId], references: [id])
+  studentCompetencies  StudentCompetency[]
+  teacherSkills        TeacherSkill[]
+  questions            Question[]
+  questionBanks        QuestionBank[]
+  learningPathItems    LearningPathItem[]
+
+  @@index([subjectId])
+  @@index([topicId])
+  @@map("competencies")
+}
+
+// ============================================================
+// 10.5 CONTENT
+// ============================================================
+
+model Course {
+  id        Int      @id @default(autoincrement())
+  subjectId Int
+  teacherId Int
+  title     String
+  status    String   @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subject Subject        @relation(fields: [subjectId], references: [id])
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id])
+  lessons Lesson[]
+
+  @@index([subjectId])
+  @@index([teacherId])
+  @@map("courses")
+}
+
+model Lesson {
+  id        Int      @id @default(autoincrement())
+  courseId  Int
+  topicId   Int?
+  title     String
+  sequence  Int      @default(0)
+  status    String   @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course             Course              @relation(fields: [courseId], references: [id])
+  topic              Topic?              @relation(fields: [topicId], references: [id])
+  materials          LearningMaterial[]
+  studentProgress    StudentProgress[]
+  learningPathItems  LearningPathItem[]
+
+  @@index([courseId])
+  @@index([topicId])
+  @@map("lessons")
+}
+
+model LearningMaterial {
+  id          Int      @id @default(autoincrement())
+  lessonId    Int
+  title       String
+  type        String // VIDEO, TEXT, PDF, LINK, etc.
+  content     String?  @db.Text
+  resourceUrl String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lesson Lesson @relation(fields: [lessonId], references: [id])
+
+  @@index([lessonId])
+  @@map("learning_materials")
+}
+
+// ============================================================
+// 10.6 QUESTIONS
+// ============================================================
+
+model QuestionBank {
+  id           Int      @id @default(autoincrement())
+  subjectId    Int
+  topicId      Int?
+  competencyId Int?
+  teacherId    Int?
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subject    Subject         @relation(fields: [subjectId], references: [id])
+  topic      Topic?          @relation(fields: [topicId], references: [id])
+  competency Competency?     @relation(fields: [competencyId], references: [id])
+  teacher    TeacherProfile? @relation(fields: [teacherId], references: [id])
+  questions  Question[]
+
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([competencyId])
+  @@index([teacherId])
+  @@map("question_banks")
+}
+
+model Question {
+  id             Int      @id @default(autoincrement())
+  questionBankId Int
+  competencyId   Int?
+  questionText   String   @db.Text
+  questionType   String   @default("MULTIPLE_CHOICE") // MULTIPLE_CHOICE, TRUE_FALSE, ESSAY
+  difficulty     String   @default("MEDIUM") // EASY, MEDIUM, HARD
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  questionBank        QuestionBank          @relation(fields: [questionBankId], references: [id])
+  competency          Competency?           @relation(fields: [competencyId], references: [id])
+  options             QuestionOption[]
+  diagnosticQuestions DiagnosticQuestion[]
+  diagnosticAnswers   DiagnosticAnswer[]
+  assessmentQuestions AssessmentQuestion[]
+  assessmentAnswers   AssessmentAnswer[]
+
+  @@index([questionBankId])
+  @@index([competencyId])
+  @@map("questions")
+}
+
+model QuestionOption {
+  id         Int      @id @default(autoincrement())
+  questionId Int
+  optionText String   @db.Text
+  isCorrect  Boolean  @default(false)
+  sequence   Int      @default(0)
+
+  question          Question           @relation(fields: [questionId], references: [id])
+  diagnosticAnswers DiagnosticAnswer[]
+  assessmentAnswers AssessmentAnswer[]
+
+  @@index([questionId])
+  @@map("question_options")
+}
+
+// ============================================================
+// 10.7 DIAGNOSTIC
+// ============================================================
+
+model DiagnosticTest {
+  id              Int      @id @default(autoincrement())
+  subjectId       Int
+  name            String
+  durationMinutes Int?
+  status          String   @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subject   Subject              @relation(fields: [subjectId], references: [id])
+  questions DiagnosticQuestion[]
+  attempts  DiagnosticAttempt[]
+
+  @@index([subjectId])
+  @@map("diagnostic_tests")
+}
+
+model DiagnosticQuestion {
+  id               Int @id @default(autoincrement())
+  diagnosticTestId Int
+  questionId       Int
+  sequence         Int @default(0)
+
+  diagnosticTest DiagnosticTest @relation(fields: [diagnosticTestId], references: [id])
+  question       Question       @relation(fields: [questionId], references: [id])
+
+  @@unique([diagnosticTestId, questionId])
+  @@index([questionId])
+  @@map("diagnostic_questions")
+}
+
+model DiagnosticAttempt {
+  id               Int       @id @default(autoincrement())
+  diagnosticTestId Int
+  studentId        Int
+  attemptNumber    Int       @default(1)
+  score            Decimal?  @db.Decimal(5, 2)
+  status           String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+
+  diagnosticTest DiagnosticTest     @relation(fields: [diagnosticTestId], references: [id])
+  student        StudentProfile     @relation(fields: [studentId], references: [id])
+  answers        DiagnosticAnswer[]
+
+  @@index([diagnosticTestId])
+  @@index([studentId])
+  @@map("diagnostic_attempts")
+}
+
+model DiagnosticAnswer {
+  id                Int      @id @default(autoincrement())
+  attemptId         Int
+  questionId        Int
+  selectedOptionId  Int?
+  isCorrect         Boolean?
+  timeSpentSeconds  Int?
+  createdAt         DateTime @default(now())
+
+  attempt        DiagnosticAttempt @relation(fields: [attemptId], references: [id])
+  question       Question          @relation(fields: [questionId], references: [id])
+  selectedOption QuestionOption?   @relation(fields: [selectedOptionId], references: [id])
+
+  @@index([attemptId])
+  @@index([questionId])
+  @@index([selectedOptionId])
+  @@map("diagnostic_answers")
+}
+
+// ============================================================
+// 10.8 LEARNING PATH & PROGRESS
+// ============================================================
+
+model LearningPath {
+  id          Int       @id @default(autoincrement())
+  studentId   Int
+  goalId      Int?
+  title       String
+  status      String    @default("ACTIVE") // ACTIVE, COMPLETED, ARCHIVED
+  generatedAt DateTime  @default(now())
+
+  student StudentProfile     @relation(fields: [studentId], references: [id])
+  goal    StudentGoal?       @relation(fields: [goalId], references: [id])
+  items   LearningPathItem[]
+
+  @@index([studentId])
+  @@index([goalId])
+  @@map("learning_paths")
+}
+
+model LearningPathItem {
+  id             Int      @id @default(autoincrement())
+  learningPathId Int
+  lessonId       Int?
+  competencyId   Int?
+  sequence       Int      @default(0)
+  status         String   @default("PENDING") // PENDING, IN_PROGRESS, DONE
+
+  learningPath LearningPath @relation(fields: [learningPathId], references: [id])
+  lesson       Lesson?      @relation(fields: [lessonId], references: [id])
+  competency   Competency?  @relation(fields: [competencyId], references: [id])
+
+  @@index([learningPathId])
+  @@index([lessonId])
+  @@index([competencyId])
+  @@map("learning_path_items")
+}
+
+model StudentProgress {
+  id                 Int       @id @default(autoincrement())
+  studentId          Int
+  lessonId           Int
+  progressPercentage Decimal   @default(0) @db.Decimal(5, 2)
+  status             String    @default("NOT_STARTED") // NOT_STARTED, IN_PROGRESS, COMPLETED
+  startedAt          DateTime?
+  completedAt        DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id])
+  lesson  Lesson         @relation(fields: [lessonId], references: [id])
+
+  @@unique([studentId, lessonId])
+  @@index([lessonId])
+  @@map("student_progress")
+}
+
+// ============================================================
+// 10.9 ASSESSMENT
+// ============================================================
+
+model Assessment {
+  id              Int      @id @default(autoincrement())
+  subjectId       Int
+  teacherId       Int
+  title           String
+  type            String   @default("FORMATIVE") // FORMATIVE, SUMMATIVE
+  durationMinutes Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subject   Subject              @relation(fields: [subjectId], references: [id])
+  teacher   TeacherProfile       @relation(fields: [teacherId], references: [id])
+  questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
+
+  @@index([subjectId])
+  @@index([teacherId])
+  @@map("assessments")
+}
+
+model AssessmentQuestion {
+  id           Int @id @default(autoincrement())
+  assessmentId Int
+  questionId   Int
+  sequence     Int @default(0)
+  points       Decimal @default(1) @db.Decimal(5, 2)
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+  question   Question   @relation(fields: [questionId], references: [id])
+
+  @@unique([assessmentId, questionId])
+  @@index([questionId])
+  @@map("assessment_questions")
+}
+
+model AssessmentAttempt {
+  id            Int       @id @default(autoincrement())
+  assessmentId  Int
+  studentId     Int
+  attemptNumber Int       @default(1)
+  score         Decimal?  @db.Decimal(5, 2)
+  status        String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  assessment Assessment         @relation(fields: [assessmentId], references: [id])
+  student    StudentProfile     @relation(fields: [studentId], references: [id])
+  answers    AssessmentAnswer[]
+
+  @@index([assessmentId])
+  @@index([studentId])
+  @@map("assessment_attempts")
+}
+
+model AssessmentAnswer {
+  id               Int      @id @default(autoincrement())
+  attemptId        Int
+  questionId       Int
+  selectedOptionId Int?
+  isCorrect        Boolean?
+  pointsEarned     Decimal? @db.Decimal(5, 2)
+  timeSpentSeconds Int?
+  createdAt        DateTime @default(now())
+
+  attempt        AssessmentAttempt @relation(fields: [attemptId], references: [id])
+  question       Question          @relation(fields: [questionId], references: [id])
+  selectedOption QuestionOption?   @relation(fields: [selectedOptionId], references: [id])
+
+  @@index([attemptId])
+  @@index([questionId])
+  @@index([selectedOptionId])
+  @@map("assessment_answers")
 }

@@ -1,0 +1,52 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique // STUDENT, ADMIN, PARENT, TUTOR, PROFESSIONAL
+
+  users User[]
+
+  @@map("roles")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  roleId    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role           Role            @relation(fields: [roleId], references: [id])
+  studentProfile StudentProfile?
+
+  @@index([roleId])
+  @@map("users")
+}
+
+model StudentProfile {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  name            String
+  school          String?
+  grade           String?
+  graduationYear  Int?
+  phone           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("student_profiles")
+}
