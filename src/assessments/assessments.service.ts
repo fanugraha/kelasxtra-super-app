@@ -13,6 +13,7 @@ import { CompetencySnapshotService } from '../learning-engine/snapshots/competen
 import { LearningEngineConfigService } from '../learning-engine/config/learning-engine-config.service';
 import { LearningPathReconciler } from '../learning-engine/learning-path/learning-path-reconciler';
 import { SubmitAssessmentDto } from './dto/submit-assessment.dto';
+import { detectSuspiciousTiming } from '../learning-engine/integrity/suspicious-timing-detector';
 
 @Injectable()
 export class AssessmentsService {
@@ -204,9 +205,25 @@ export class AssessmentsService {
       const overallScore =
         totalPossiblePoints > 0 ? (totalEarnedPoints / totalPossiblePoints) * 100 : 0;
 
+      // Sesi 6: deteksi timing mencurigakan -- pola identik dengan
+      // DiagnosticsService, fungsi pure yang sama-sama di-reuse.
+      const timingCheck = detectSuspiciousTiming(
+        enrichedAnswers.map((a) => ({ timeSpentSeconds: a.timeSpentSeconds })),
+      );
+
       const updatedAttempt = await tx.assessmentAttempt.update({
         where: { id: attempt.id },
-        data: { score: overallScore, completedAt: new Date() },
+        data: {
+          score: overallScore,
+          completedAt: new Date(),
+          ...(timingCheck.isFlagged
+            ? {
+                isFlagged: true,
+                flagReason: timingCheck.flagReason,
+                flaggedAt: new Date(),
+              }
+            : {}),
+        },
       });
 
       // 17. Return learning profile.

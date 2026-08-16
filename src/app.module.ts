@@ -44,10 +44,19 @@ import { AssessmentsModule } from './assessments/assessments.module';
   controllers: [AppController],
   providers: [
     AppService,
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+    // Rate limiting dimatikan HANYA saat NODE_ENV=test -- limit produksi
+    // (termasuk @Throttle 5/60s di AuthController) sama sekali tidak
+    // berubah untuk environment lain. Tanpa ini, e2e test yang bikin
+    // banyak akun (happy path, duplicate submission, security, dst dalam
+    // satu run) akan kena 429 padahal bukan itu yang sedang diuji.
+    ...(process.env.NODE_ENV === 'test'
+      ? []
+      : [
+          {
+            provide: APP_GUARD,
+            useClass: ThrottlerGuard,
+          },
+        ]),
   ],
 })
 export class AppModule {}

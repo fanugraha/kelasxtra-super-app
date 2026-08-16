@@ -6,14 +6,16 @@ const ADMIN_SEED_EMAIL = 'admin@kelasxtra.test';
 const ADMIN_SEED_PASSWORD = 'admin12345';
 
 async function runSeed() {
-  const adapter = new PrismaMariaDb({
-    host: 'localhost',
-    port: 3306,
-    user: 'root',
-    password: process.env.DB_PASSWORD || 'qwerty123',
-    database: 'education_app',
-    connectionLimit: 5,
-  });
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL belum di-set. Seed tidak boleh fallback ke kredensial hardcoded.');
+  }
+
+  // Sekarang konsisten dengan PrismaService: satu-satunya sumber koneksi
+  // adalah DATABASE_URL, supaya `DATABASE_URL=... npx tsx prisma/seed.ts`
+  // benar-benar mengarah ke database yang dimaksud (dev vs test vs lainnya).
+  const adapter = new PrismaMariaDb(databaseUrl);
 
   const prisma = new PrismaClient({ adapter });
 
