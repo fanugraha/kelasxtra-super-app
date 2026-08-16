@@ -44,6 +44,7 @@ model User {
   teacherProfile TeacherProfile?
   refreshTokens  RefreshToken[]
   auditLogs      AuditLog[]
+  voidedDiagnosticAttempts DiagnosticAttempt[] @relation("VoidedDiagnosticAttempts")
 
   @@index([roleId])
   @@map("users")
@@ -445,19 +446,30 @@ model DiagnosticAttempt {
   studentId        Int
   attemptNumber    Int       @default(1)
   score            Decimal?  @db.Decimal(5, 2)
-  status           String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED
-  isFlagged        Boolean   @default(false) // indikasi kecurangan (mis. waktu jawab tidak wajar)
+  status           String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED, VOID
+  isFlagged        Boolean   @default(false) // indikasi kecurangan (mis. waktu jawab tidak wajar / lewat durationMinutes)
   flagReason       String?   @db.Text
   flaggedAt        DateTime?
   startedAt        DateTime  @default(now())
   completedAt      DateTime?
 
+  // Keputusan bisnis: diagnostic test dibatasi 1x per siswa per test
+  // (lihat DiagnosticsService.startAttempt) -- kalau perlu diulang (mis.
+  // ada kendala teknis saat tes), ADMIN/TEACHER bisa "void" attempt lama
+  // ini lewat POST /diagnostics/attempts/:id/void, bukan menghapusnya,
+  // supaya riwayat tetap bisa ditelusuri.
+  voidedAt       DateTime?
+  voidReason     String?   @db.Text
+  voidedByUserId Int?
+
   diagnosticTest DiagnosticTest     @relation(fields: [diagnosticTestId], references: [id])
   student        StudentProfile     @relation(fields: [studentId], references: [id])
+  voidedByUser   User?              @relation("VoidedDiagnosticAttempts", fields: [voidedByUserId], references: [id])
   answers        DiagnosticAnswer[]
 
   @@index([diagnosticTestId])
   @@index([studentId])
+  @@index([voidedByUserId])
   @@map("diagnostic_attempts")
 }
 

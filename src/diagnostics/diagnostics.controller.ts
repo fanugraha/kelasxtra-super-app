@@ -5,6 +5,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DiagnosticsService } from './diagnostics.service';
 import { SubmitDiagnosticDto } from './dto/submit-diagnostic.dto';
+import { VoidAttemptDto } from './dto/void-attempt.dto';
 
 @Controller('diagnostics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,5 +27,23 @@ export class DiagnosticsController {
   ) {
     const result = await this.diagnosticsService.submit(user.userId, id, dto);
     return { success: true, data: result, message: 'Diagnostic berhasil disubmit' };
+  }
+
+  // Reset path untuk cap 1x attempt (keputusan bisnis 16 Agustus 2026,
+  // item #4) -- @Roles method-level ini override @Roles('STUDENT') di
+  // level class, jadi HANYA ADMIN/TEACHER yang bisa panggil endpoint ini.
+  @Post('attempts/:attemptId/void')
+  @Roles('ADMIN', 'TEACHER')
+  async voidAttempt(
+    @CurrentUser() user: { userId: number },
+    @Param('attemptId', ParseIntPipe) attemptId: number,
+    @Body() dto: VoidAttemptDto,
+  ) {
+    const attempt = await this.diagnosticsService.voidAttempt(user.userId, attemptId, dto.reason);
+    return {
+      success: true,
+      data: attempt,
+      message: 'Attempt berhasil di-void, siswa sekarang bisa mengulang diagnostic test ini.',
+    };
   }
 }

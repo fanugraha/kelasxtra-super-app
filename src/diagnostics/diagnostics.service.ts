@@ -38,7 +38,14 @@ export class DiagnosticsService {
     return profile;
   }
 
-  // Step 1 (start): buat attempt baru, status IN_PROGRESS.
+  // Keputusan bisnis (16 Agustus 2026): diagnostic test itu "titik awal"
+  // (starting point) buat learning path siswa, BUKAN latihan yang boleh
+  // diulang bebas -- kalau boleh diulang tanpa batas, siswa bisa "diagnostic
+  // shopping" (coba berkali-kali sampai dapat hasil yang menguntungkan),
+  // dan starting point yang dipakai buat rekomendasi belajar jadi tidak
+  // jujur. Assessment/latihan TIDAK kena aturan ini (lihat
+  // AssessmentsService) -- itu memang harus boleh diulang seiring waktu,
+  // beda peran dengan diagnostic.
   async startAttempt(userId: number, diagnosticTestId: number) {
     const profile = await this.findProfileByUserId(userId);
 
@@ -48,6 +55,23 @@ export class DiagnosticsService {
 
     if (!diagnosticTest) {
       throw new NotFoundException('Diagnostic test tidak ditemukan.');
+    }
+
+    const latestAttempt = await this.prisma.diagnosticAttempt.findFirst({
+      where: { diagnosticTestId, studentId: profile.id },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    if (latestAttempt?.status === 'SUBMITTED') {
+      throw new ConflictException(
+        'Kamu sudah menyelesaikan diagnostic test ini. Diagnostic test hanya bisa dikerjakan sekali -- hubungi guru/admin kalau butuh mengulang.',
+      );
+    }
+
+    // Attempt lama masih IN_PROGRESS (mis. tab ditutup sebelum submit) --
+    // lanjutkan attempt yang sama, jangan bikin duplikat.
+    if (latestAttempt?.status === 'IN_PROGRESS') {
+      return latestAttempt;
     }
 
     const previousAttemptsCount = await this.prisma.diagnosticAttempt.count({
@@ -60,6 +84,33 @@ export class DiagnosticsService {
         studentId: profile.id,
         attemptNumber: previousAttemptsCount + 1,
         status: 'IN_PROGRESS',
+      },
+    });
+  }
+
+  // ADMIN/TEACHER only (ditegakkan di controller lewat @Roles). "Void"
+  // dipilih daripada delete supaya riwayat attempt asli tetap bisa
+  // ditelusuri -- siapa yang reset, kapan, dan alasannya apa.
+  async voidAttempt(actorUserId: number, attemptId: number, reason?: string) {
+    const attempt = await this.prisma.diagnosticAttempt.findUnique({
+      where: { id: attemptId },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Attempt tidak ditemukan.');
+    }
+
+    if (attempt.status === 'VOID') {
+      throw new ConflictException('Attempt ini sudah di-void sebelumnya.');
+    }
+
+    return this.prisma.diagnosticAttempt.update({
+      where: { id: attemptId },
+      data: {
+        status: 'VOID',
+        voidedAt: new Date(),
+        voidReason: reason,
+        voidedByUserId: actorUserId,
       },
     });
   }
@@ -214,15 +265,40 @@ export class DiagnosticsService {
         enrichedAnswers.map((a) => ({ timeSpentSeconds: a.timeSpentSeconds })),
       );
 
+      // Keputusan bisnis (16 Agustus 2026, item #3): durationMinutes DITEGAKKAN
+      // sebagai SOFT FLAG, bukan blokir keras -- attempt yang telat tetap
+      // diterima & tetap dihitung skornya (siswa tidak dihukum kalau
+      // internetnya lelet), tapi ditandai isFlagged supaya guru/admin bisa
+      // menilai sendiri lewat data, bukan lewat sistem yang menolak mentah-mentah.
+      const diagnosticTest = await tx.diagnosticTest.findUnique({
+        where: { id: diagnosticTestId },
+        select: { durationMinutes: true },
+      });
+      const elapsedMinutes =
+        (Date.now() - attempt.startedAt.getTime()) / 60_000;
+      const isOverDuration =
+        diagnosticTest?.durationMinutes != null &&
+        elapsedMinutes > diagnosticTest.durationMinutes;
+
+      const flagReasons = [
+        ...(timingCheck.isFlagged && timingCheck.flagReason ? [timingCheck.flagReason] : []),
+        ...(isOverDuration
+          ? [
+              `Melebihi batas waktu pengerjaan (${diagnosticTest!.durationMinutes} menit, selesai dalam ${Math.round(elapsedMinutes)} menit).`,
+            ]
+          : []),
+      ];
+      const isFlagged = timingCheck.isFlagged || isOverDuration;
+
       const updatedAttempt = await tx.diagnosticAttempt.update({
         where: { id: attempt.id },
         data: {
           score: overallScore,
           completedAt: new Date(),
-          ...(timingCheck.isFlagged
+          ...(isFlagged
             ? {
                 isFlagged: true,
-                flagReason: timingCheck.flagReason,
+                flagReason: flagReasons.join(' | '),
                 flaggedAt: new Date(),
               }
             : {}),

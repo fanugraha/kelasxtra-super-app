@@ -1,3 +1,10 @@
+#!/bin/bash
+set -e
+echo ">> Hotfix: assessments.service.ts kemarin kurang satu } penutup class (bug dari saya, lolos dari syntax-check sebelumnya). File lain (controller, kedua e2e spec) tidak berubah, tidak perlu ditulis ulang."
+
+mkdir -p "$(dirname "src/assessments/assessments.service.ts")"
+echo ">> Menulis src/assessments/assessments.service.ts"
+cat > src/assessments/assessments.service.ts << 'KELASXTRA_APPLY_EOF_HOTFIX_BRACE'
 import {
   BadRequestException,
   ConflictException,
@@ -364,3 +371,8 @@ export class AssessmentsService {
     return { attempt, answers, competencySnapshots };
   }
 }
+KELASXTRA_APPLY_EOF_HOTFIX_BRACE
+
+echo ""
+echo ">> Selesai."
+echo "Langkah selanjutnya: npm run test:e2e"
