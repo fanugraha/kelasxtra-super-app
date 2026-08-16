@@ -64,6 +64,36 @@ async function runSeed() {
     console.log('Akun ADMIN seed sudah ada, tidak dibuat ulang.');
   }
 
+  // Learning Engine Phase 4: harus selalu ada tepat satu config yang active=true.
+  // Kalau nanti tim akademik mau tuning formula, insert baris baru dengan
+  // configVersion lebih tinggi, matikan yang lama (active=false) — jangan
+  // pernah update baris config yang sudah pernah dipakai (supaya snapshot lama
+  // tetap bisa ditelusuri formula-nya lewat engineVersion/configVersion).
+  const existingActiveConfig = await prisma.learningEngineConfig.findFirst({
+    where: { active: true },
+  });
+
+  if (!existingActiveConfig) {
+    await prisma.learningEngineConfig.create({
+      data: {
+        alpha: 0.3,
+        difficultyEasyWeight: 1.0,
+        difficultyMediumWeight: 1.5,
+        difficultyHardWeight: 2.0,
+        masteredThreshold: 80,
+        developingThreshold: 60,
+        confidenceK: 5,
+        minimumConfidence: 0.6,
+        engineVersion: 1,
+        configVersion: 1,
+        active: true,
+      },
+    });
+    console.log('LearningEngineConfig default (v1) dibuat.');
+  } else {
+    console.log('LearningEngineConfig active sudah ada, tidak dibuat ulang.');
+  }
+
   await prisma.$disconnect();
 }
 

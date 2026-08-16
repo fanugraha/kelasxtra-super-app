@@ -12,6 +12,8 @@ import { SubjectsModule } from './subjects/subjects.module';
 import { TopicsModule } from './topics/topics.module';
 import { CompetenciesModule } from './competencies/competencies.module';
 import { CommonModule } from './common/common.module';
+import { DiagnosticsModule } from './diagnostics/diagnostics.module';
+import { AssessmentsModule } from './assessments/assessments.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { CommonModule } from './common/common.module';
     SubjectsModule,
     TopicsModule,
     CompetenciesModule,
+    DiagnosticsModule,
+    AssessmentsModule,
   ],
   controllers: [AppController],
   providers: [

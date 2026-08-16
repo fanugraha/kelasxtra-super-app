@@ -101,6 +101,7 @@ model StudentProfile {
   assessmentAttempts  AssessmentAttempt[]
   progress     StudentProgress[]
   learningPaths LearningPath[]
+  competencySnapshots CompetencySnapshot[]
 
   @@map("student_profiles")
 }
@@ -138,19 +139,24 @@ model StudentPreference {
 }
 
 model StudentCompetency {
-  id              Int      @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   studentId       Int
   competencyId    Int
-  masteryScore    Decimal  @default(0) @db.Decimal(5, 2)
-  confidenceScore Decimal? @db.Decimal(5, 2)
-  updatedAt       DateTime @updatedAt
-  createdAt       DateTime @default(now())
+  totalAnswered   Int       @default(0) // hanya bertambah, jangan pernah di-reset
+  totalCorrect    Int       @default(0) // hanya bertambah, jangan pernah di-reset
+  masteryScore    Decimal   @default(0) @db.Decimal(5, 2) // derived state, dihitung via EMA
+  confidenceScore Decimal?  @db.Decimal(5, 4) // derived state, fungsi saturasi dari totalAnswered
+  masteryBucket   String    @default("INSUFFICIENT_DATA") // INSUFFICIENT_DATA, LEARNING_GAP, DEVELOPING, MASTERED
+  lastAttemptAt   DateTime?
+  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
 
   student    StudentProfile @relation(fields: [studentId], references: [id])
   competency Competency     @relation(fields: [competencyId], references: [id])
 
   @@unique([studentId, competencyId])
   @@index([competencyId])
+  @@index([studentId, masteryBucket])
   @@map("student_competencies")
 }
 
@@ -267,6 +273,7 @@ model Competency {
   questions            Question[]
   questionBanks        QuestionBank[]
   learningPathItems    LearningPathItem[]
+  competencySnapshots  CompetencySnapshot[]
 
   @@index([subjectId])
   @@index([topicId])
@@ -439,6 +446,9 @@ model DiagnosticAttempt {
   attemptNumber    Int       @default(1)
   score            Decimal?  @db.Decimal(5, 2)
   status           String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED
+  isFlagged        Boolean   @default(false) // indikasi kecurangan (mis. waktu jawab tidak wajar)
+  flagReason       String?   @db.Text
+  flaggedAt        DateTime?
   startedAt        DateTime  @default(now())
   completedAt      DateTime?
 
@@ -573,6 +583,9 @@ model AssessmentAttempt {
   attemptNumber Int       @default(1)
   score         Decimal?  @db.Decimal(5, 2)
   status        String    @default("IN_PROGRESS") // IN_PROGRESS, SUBMITTED, EXPIRED
+  isFlagged     Boolean   @default(false) // indikasi kecurangan (mis. waktu jawab tidak wajar)
+  flagReason    String?   @db.Text
+  flaggedAt     DateTime?
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
 
@@ -603,4 +616,50 @@ model AssessmentAnswer {
   @@index([questionId])
   @@index([selectedOptionId])
   @@map("assessment_answers")
+}
+
+// ============================================================
+// PHASE 4 — LEARNING ENGINE & MASTERY SYSTEM
+// ============================================================
+
+model CompetencySnapshot {
+  id                   Int      @id @default(autoincrement())
+  studentId            Int
+  competencyId         Int
+  masteryScore         Decimal  @db.Decimal(5, 2)
+  confidenceScore      Decimal  @db.Decimal(5, 4)
+  totalAnswered        Int
+  totalCorrect         Int
+  masteryBucket        String // INSUFFICIENT_DATA, LEARNING_GAP, DEVELOPING, MASTERED
+  triggeredByAttemptId Int // referensi lepas ke diagnostic_attempts.id atau assessment_attempts.id (lihat sourceType)
+  sourceType           String // DIAGNOSTIC, ASSESSMENT (bisa diperluas: PRACTICE, dst)
+  engineVersion        Int
+  configVersion        Int
+  createdAt            DateTime @default(now()) // append-only, tidak pernah di-update
+
+  student    StudentProfile @relation(fields: [studentId], references: [id])
+  competency Competency     @relation(fields: [competencyId], references: [id])
+
+  @@index([studentId, competencyId, createdAt])
+  @@index([triggeredByAttemptId])
+  @@map("competency_snapshots")
+}
+
+model LearningEngineConfig {
+  id                     Int      @id @default(autoincrement())
+  alpha                  Decimal  @default(0.30) @db.Decimal(3, 2) // bobot EMA ke attempt terbaru
+  difficultyEasyWeight   Decimal  @default(1.0) @db.Decimal(3, 2)
+  difficultyMediumWeight Decimal  @default(1.5) @db.Decimal(3, 2)
+  difficultyHardWeight   Decimal  @default(2.0) @db.Decimal(3, 2)
+  masteredThreshold      Decimal  @default(80) @db.Decimal(5, 2)
+  developingThreshold    Decimal  @default(60) @db.Decimal(5, 2)
+  confidenceK            Decimal  @default(5) @db.Decimal(5, 2) // konstanta saturasi confidence
+  minimumConfidence      Decimal  @default(0.60) @db.Decimal(3, 2) // gate INSUFFICIENT_DATA
+  engineVersion          Int      @default(1)
+  configVersion          Int      @default(1)
+  active                 Boolean  @default(true) // hanya satu baris boleh active=true pada satu waktu
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@map("learning_engine_configs")
 }
