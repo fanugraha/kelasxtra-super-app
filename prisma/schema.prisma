@@ -474,6 +474,7 @@ model DiagnosticAnswer {
   question       Question          @relation(fields: [questionId], references: [id])
   selectedOption QuestionOption?   @relation(fields: [selectedOptionId], references: [id])
 
+  @@unique([attemptId, questionId])
   @@index([attemptId])
   @@index([questionId])
   @@index([selectedOptionId])
@@ -612,6 +613,7 @@ model AssessmentAnswer {
   question       Question          @relation(fields: [questionId], references: [id])
   selectedOption QuestionOption?   @relation(fields: [selectedOptionId], references: [id])
 
+  @@unique([attemptId, questionId])
   @@index([attemptId])
   @@index([questionId])
   @@index([selectedOptionId])

@@ -3,6 +3,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import {
   aggregateEvidence,
   EvidenceAggregationResult,
+  OptionLookup,
   QuestionLookup,
   RawSubmittedAnswer,
 } from './evidence-aggregator';
@@ -30,18 +31,27 @@ export class EvidenceService {
 
     const questionIds = [...new Set(rawAnswers.map((a) => a.questionId))];
     const selectedOptionIds = [
-      ...new Set(rawAnswers.map((a) => a.selectedOptionId).filter((id): id is number => id !== null)),
+      ...new Set(
+        rawAnswers
+          .map((a) => a.selectedOptionId)
+          .filter((id): id is number => id !== null),
+      ),
     ];
 
-    const [questions, correctOptions] = await Promise.all([
+    const [questions, selectedOptions] = await Promise.all([
       tx.question.findMany({
         where: { id: { in: questionIds } },
         select: { id: true, competencyId: true, difficulty: true },
       }),
+      // Fix Bug #1: dulu query ini di-filter `isCorrect: true` lalu hasilnya
+      // dijadikan Set<number> global, jadi sistem cuma tahu "option ID ini
+      // benar", tanpa tahu benar UNTUK SOAL MANA. Sekarang kita ambil
+      // questionId pemilik tiap option (regardless benar/salah) supaya bisa
+      // divalidasi option itu benar-benar milik soal yang sedang dijawab.
       selectedOptionIds.length > 0
         ? tx.questionOption.findMany({
-            where: { id: { in: selectedOptionIds }, isCorrect: true },
-            select: { id: true },
+            where: { id: { in: selectedOptionIds } },
+            select: { id: true, questionId: true, isCorrect: true },
           })
         : Promise.resolve([]),
     ]);
@@ -49,12 +59,20 @@ export class EvidenceService {
     const questionLookup = new Map<number, QuestionLookup>(
       questions.map((q) => [
         q.id,
-        { competencyId: q.competencyId, difficulty: q.difficulty as Difficulty },
+        {
+          competencyId: q.competencyId,
+          difficulty: q.difficulty as Difficulty,
+        },
       ]),
     );
 
-    const correctOptionIds = new Set(correctOptions.map((o) => o.id));
+    const optionLookup = new Map<number, OptionLookup>(
+      selectedOptions.map((o) => [
+        o.id,
+        { questionId: o.questionId, isCorrect: o.isCorrect },
+      ]),
+    );
 
-    return aggregateEvidence(rawAnswers, questionLookup, correctOptionIds);
+    return aggregateEvidence(rawAnswers, questionLookup, optionLookup);
   }
 }

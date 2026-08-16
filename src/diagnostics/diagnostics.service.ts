@@ -27,7 +27,9 @@ export class DiagnosticsService {
   ) {}
 
   private async findProfileByUserId(userId: number) {
-    const profile = await this.prisma.studentProfile.findUnique({ where: { userId } });
+    const profile = await this.prisma.studentProfile.findUnique({
+      where: { userId },
+    });
 
     if (!profile) {
       throw new NotFoundException('Profil student tidak ditemukan.');
@@ -68,7 +70,11 @@ export class DiagnosticsService {
    * transaction ... jangan sampai answer berhasil masuk tapi
    * StudentCompetency gagal update").
    */
-  async submit(userId: number, diagnosticTestId: number, dto: SubmitDiagnosticDto) {
+  async submit(
+    userId: number,
+    diagnosticTestId: number,
+    dto: SubmitDiagnosticDto,
+  ) {
     const profile = await this.findProfileByUserId(userId);
 
     return this.prisma.$transaction(async (tx) => {
@@ -84,7 +90,9 @@ export class DiagnosticsService {
         throw new ForbiddenException('Attempt ini bukan milik kamu.');
       }
       if (attempt.diagnosticTestId !== diagnosticTestId) {
-        throw new BadRequestException('Attempt ini bukan untuk diagnostic test ini.');
+        throw new BadRequestException(
+          'Attempt ini bukan untuk diagnostic test ini.',
+        );
       }
 
       // 3. Validate attempt status -- idempotency guard yang ATOMIC.
@@ -98,16 +106,23 @@ export class DiagnosticsService {
       });
 
       if (guarded.count === 0) {
-        throw new ConflictException('Attempt ini sudah pernah disubmit sebelumnya.');
+        throw new ConflictException(
+          'Attempt ini sudah pernah disubmit sebelumnya.',
+        );
       }
 
       // 4. Validate submitted answers -- questionId harus benar-benar
-      // bagian dari diagnostic test ini (bukan soal dari test lain).
+      // bagian dari diagnostic test ini (bukan soal dari test lain), DAN
+      // tidak boleh ada questionId yang dikirim berulang kali dalam satu
+      // payload (fix Bug #2 QA audit 16 Agustus 2026: sebelumnya siswa bisa
+      // kirim 1 questionId yang sama puluhan kali untuk menggelembungkan
+      // totalAnswered/confidence dalam satu submission).
       const validQuestions = await tx.diagnosticQuestion.findMany({
         where: { diagnosticTestId },
         select: { questionId: true },
       });
       const validQuestionIds = new Set(validQuestions.map((q) => q.questionId));
+      const seenQuestionIds = new Set<number>();
 
       for (const answer of dto.answers) {
         if (!validQuestionIds.has(answer.questionId)) {
@@ -115,6 +130,12 @@ export class DiagnosticsService {
             `Question ${answer.questionId} bukan bagian dari diagnostic test ini.`,
           );
         }
+        if (seenQuestionIds.has(answer.questionId)) {
+          throw new BadRequestException(
+            `Question ${answer.questionId} dikirim lebih dari sekali dalam satu submission.`,
+          );
+        }
+        seenQuestionIds.add(answer.questionId);
       }
 
       // 5-7. Load semua question dalam satu batch query, map ke
@@ -125,10 +146,8 @@ export class DiagnosticsService {
         timeSpentSeconds: a.timeSpentSeconds ?? null,
       }));
 
-      const { enrichedAnswers, evidenceByCompetency } = await this.evidenceService.loadAndAggregate(
-        tx,
-        normalizedAnswers,
-      );
+      const { enrichedAnswers, evidenceByCompetency } =
+        await this.evidenceService.loadAndAggregate(tx, normalizedAnswers);
 
       // 8. Insert DiagnosticAnswer (bulk, bukan satu-satu).
       await tx.diagnosticAnswer.createMany({

@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsInt, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsInt,
+  ValidateNested,
+} from 'class-validator';
 import { SubmitAssessmentAnswerDto } from './submit-assessment-answer.dto';
 
 export class SubmitAssessmentDto {
@@ -8,6 +14,7 @@ export class SubmitAssessmentDto {
 
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => SubmitAssessmentAnswerDto)
   answers: SubmitAssessmentAnswerDto[];

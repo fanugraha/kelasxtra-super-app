@@ -27,7 +27,9 @@ export class AssessmentsService {
   ) {}
 
   private async findProfileByUserId(userId: number) {
-    const profile = await this.prisma.studentProfile.findUnique({ where: { userId } });
+    const profile = await this.prisma.studentProfile.findUnique({
+      where: { userId },
+    });
 
     if (!profile) {
       throw new NotFoundException('Profil student tidak ditemukan.');
@@ -89,7 +91,9 @@ export class AssessmentsService {
         throw new ForbiddenException('Attempt ini bukan milik kamu.');
       }
       if (attempt.assessmentId !== assessmentId) {
-        throw new BadRequestException('Attempt ini bukan untuk assessment ini.');
+        throw new BadRequestException(
+          'Attempt ini bukan untuk assessment ini.',
+        );
       }
 
       // 3. Validate attempt status -- idempotency guard ATOMIC, sama
@@ -100,12 +104,16 @@ export class AssessmentsService {
       });
 
       if (guarded.count === 0) {
-        throw new ConflictException('Attempt ini sudah pernah disubmit sebelumnya.');
+        throw new ConflictException(
+          'Attempt ini sudah pernah disubmit sebelumnya.',
+        );
       }
 
       // 4. Validate submitted answers + sekaligus ambil `points` per soal
       // dalam SATU query (bukan dua query terpisah untuk validasi dan
-      // untuk ambil points).
+      // untuk ambil points). Juga tolak questionId yang dikirim berulang
+      // dalam satu payload (fix Bug #2 QA audit 16 Agustus 2026 -- pola
+      // sama persis dengan DiagnosticsService).
       const assessmentQuestions = await tx.assessmentQuestion.findMany({
         where: { assessmentId },
         select: { questionId: true, points: true },
@@ -113,6 +121,7 @@ export class AssessmentsService {
       const pointsByQuestionId = new Map(
         assessmentQuestions.map((q) => [q.questionId, Number(q.points)]),
       );
+      const seenQuestionIds = new Set<number>();
 
       for (const answer of dto.answers) {
         if (!pointsByQuestionId.has(answer.questionId)) {
@@ -120,6 +129,12 @@ export class AssessmentsService {
             `Question ${answer.questionId} bukan bagian dari assessment ini.`,
           );
         }
+        if (seenQuestionIds.has(answer.questionId)) {
+          throw new BadRequestException(
+            `Question ${answer.questionId} dikirim lebih dari sekali dalam satu submission.`,
+          );
+        }
+        seenQuestionIds.add(answer.questionId);
       }
 
       // 5-7. Load semua question dalam satu batch query, map ke
@@ -131,10 +146,8 @@ export class AssessmentsService {
         timeSpentSeconds: a.timeSpentSeconds ?? null,
       }));
 
-      const { enrichedAnswers, evidenceByCompetency } = await this.evidenceService.loadAndAggregate(
-        tx,
-        normalizedAnswers,
-      );
+      const { enrichedAnswers, evidenceByCompetency } =
+        await this.evidenceService.loadAndAggregate(tx, normalizedAnswers);
 
       // 8. Insert AssessmentAnswer (bulk), sekalian hitung pointsEarned
       // per jawaban dari map yang sudah di-load di step 4.
@@ -144,7 +157,9 @@ export class AssessmentsService {
           questionId: a.questionId,
           selectedOptionId: a.selectedOptionId ?? undefined,
           isCorrect: a.isCorrect,
-          pointsEarned: a.isCorrect ? (pointsByQuestionId.get(a.questionId) ?? 0) : 0,
+          pointsEarned: a.isCorrect
+            ? (pointsByQuestionId.get(a.questionId) ?? 0)
+            : 0,
           timeSpentSeconds: a.timeSpentSeconds ?? undefined,
         })),
       });
@@ -203,7 +218,9 @@ export class AssessmentsService {
       }
 
       const overallScore =
-        totalPossiblePoints > 0 ? (totalEarnedPoints / totalPossiblePoints) * 100 : 0;
+        totalPossiblePoints > 0
+          ? (totalEarnedPoints / totalPossiblePoints) * 100
+          : 0;
 
       // Sesi 6: deteksi timing mencurigakan -- pola identik dengan
       // DiagnosticsService, fungsi pure yang sama-sama di-reuse.

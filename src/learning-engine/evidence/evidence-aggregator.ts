@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { AnswerEvidence, Difficulty } from '../learning-engine.types';
 
 export interface RawSubmittedAnswer {
@@ -9,6 +10,15 @@ export interface RawSubmittedAnswer {
 export interface QuestionLookup {
   competencyId: number | null;
   difficulty: Difficulty;
+}
+
+// Dulu cuma Set<number> dari option ID yang "benar" secara GLOBAL — itu yang
+// jadi celah Bug #1 (lihat evidence.service.ts). Sekarang per-option kita
+// tahu dia MILIK question mana, supaya bisa divalidasi option itu benar
+// UNTUK SOAL YANG SEDANG DIJAWAB, bukan cuma "benar untuk soal manapun".
+export interface OptionLookup {
+  questionId: number;
+  isCorrect: boolean;
 }
 
 export interface EnrichedAnswer extends RawSubmittedAnswer {
@@ -32,11 +42,17 @@ export interface EvidenceAggregationResult {
  * masuk ke enrichedAnswers (untuk disimpan sebagai jawaban), tapi TIDAK ikut
  * dikelompokkan ke evidenceByCompetency karena tidak ada mastery yang perlu
  * di-update untuknya.
+ *
+ * KEAMANAN (fix Bug #1): sebuah selectedOptionId dianggap benar HANYA kalau
+ * option itu benar-benar milik questionId yang sedang dijawab DAN isCorrect
+ * true. Sebelumnya sistem cuma cek "apakah option ID ini benar untuk soal
+ * manapun" (Set global) — itu memungkinkan siswa mengirim satu optionId
+ * yang benar untuk SEMUA soal lain dalam payload dan dianggap semuanya benar.
  */
 export function aggregateEvidence(
   rawAnswers: RawSubmittedAnswer[],
   questionLookup: Map<number, QuestionLookup>,
-  correctOptionIds: Set<number>,
+  optionLookup: Map<number, OptionLookup>,
 ): EvidenceAggregationResult {
   const enrichedAnswers: EnrichedAnswer[] = [];
   const evidenceByCompetency = new Map<number, AnswerEvidence[]>();
@@ -45,10 +61,20 @@ export function aggregateEvidence(
     const question = questionLookup.get(raw.questionId);
 
     if (!question) {
-      throw new Error(`aggregateEvidence: question ${raw.questionId} tidak ditemukan.`);
+      throw new BadRequestException(
+        `Question ${raw.questionId} tidak ditemukan.`,
+      );
     }
 
-    const isCorrect = raw.selectedOptionId !== null && correctOptionIds.has(raw.selectedOptionId);
+    let isCorrect = false;
+    if (raw.selectedOptionId !== null) {
+      const option = optionLookup.get(raw.selectedOptionId);
+      // option harus ada DAN benar-benar milik question ini -- inilah inti
+      // fix-nya. Kalau siswa kirim optionId dari soal lain, option.questionId
+      // tidak akan cocok dengan raw.questionId, jadi tetap dianggap salah.
+      isCorrect =
+        !!option && option.questionId === raw.questionId && option.isCorrect;
+    }
 
     const enriched: EnrichedAnswer = {
       ...raw,
@@ -59,7 +85,8 @@ export function aggregateEvidence(
     enrichedAnswers.push(enriched);
 
     if (question.competencyId !== null) {
-      const evidenceList = evidenceByCompetency.get(question.competencyId) ?? [];
+      const evidenceList =
+        evidenceByCompetency.get(question.competencyId) ?? [];
       evidenceList.push({ difficulty: question.difficulty, isCorrect });
       evidenceByCompetency.set(question.competencyId, evidenceList);
     }
