@@ -415,6 +415,16 @@ model DiagnosticTest {
   name            String
   durationMinutes Int?
   status          String   @default("ACTIVE") // ACTIVE, INACTIVE
+
+  // Keputusan bisnis 16 Agustus 2026: diagnostic dibatasi 1x per siswa
+  // (lihat DiagnosticsService.startAttempt) supaya starting-point learning
+  // path tidak bisa di-"shopping". Field ini DIBUAT SEKARANG (walau belum
+  // ada UI teacher untuk mengubahnya) supaya kalau nanti Teacher Engine
+  // butuh per-test override (mis. diagnostic ulangan semester vs diagnostic
+  // awal), itu cuma butuh baca kolom ini -- BUKAN migration + rewrite
+  // service lagi. Default false = perilaku SEKARANG (1x, tidak berubah).
+  allowMultipleAttempts Boolean @default(false)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -561,6 +571,15 @@ model Assessment {
   title           String
   type            String   @default("FORMATIVE") // FORMATIVE, SUMMATIVE
   durationMinutes Int?
+
+  // Sama alasannya dengan DiagnosticTest.allowMultipleAttempts: cooldown
+  // 24 jam saat ini masih konstanta global di AssessmentsService. Kolom
+  // ini nullable -- null berarti "pakai default service" (24 jam,
+  // perilaku SEKARANG, tidak berubah). Nanti kalau guru butuh atur beda
+  // per assessment (mis. quiz mingguan vs latihan bebas), tinggal isi
+  // kolom ini lewat Teacher Engine, tanpa migration baru.
+  cooldownHours   Int?
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

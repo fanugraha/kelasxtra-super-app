@@ -45,7 +45,11 @@ export class AssessmentsService {
   // evidence masuk). Yang dibatasi bukan JUMLAH ulangnya, tapi JEDANYA --
   // supaya siswa tidak spam submit berkali-kali dalam semenit cuma buat
   // menggelembungkan confidence score secara artifisial, bukan belajar beneran.
-  private static readonly ATTEMPT_COOLDOWN_HOURS = 24;
+  //
+  // Ini DEFAULT fallback -- assessment.cooldownHours (nullable) bisa
+  // override per-item kalau nanti Teacher Engine butuh itu, tanpa
+  // migration/rewrite lagi (lihat komentar di schema.prisma).
+  private static readonly DEFAULT_ATTEMPT_COOLDOWN_HOURS = 24;
 
   async startAttempt(userId: number, assessmentId: number) {
     const profile = await this.findProfileByUserId(userId);
@@ -69,13 +73,14 @@ export class AssessmentsService {
     }
 
     if (latestAttempt?.status === 'SUBMITTED' && latestAttempt.completedAt) {
+      const cooldownHours =
+        assessment.cooldownHours ??
+        AssessmentsService.DEFAULT_ATTEMPT_COOLDOWN_HOURS;
       const hoursSinceLastAttempt =
         (Date.now() - latestAttempt.completedAt.getTime()) / 3_600_000;
 
-      if (hoursSinceLastAttempt < AssessmentsService.ATTEMPT_COOLDOWN_HOURS) {
-        const hoursRemaining = Math.ceil(
-          AssessmentsService.ATTEMPT_COOLDOWN_HOURS - hoursSinceLastAttempt,
-        );
+      if (hoursSinceLastAttempt < cooldownHours) {
+        const hoursRemaining = Math.ceil(cooldownHours - hoursSinceLastAttempt);
         throw new ConflictException(
           `Kamu baru saja mengerjakan assessment ini. Coba lagi dalam ${hoursRemaining} jam.`,
         );
@@ -277,7 +282,9 @@ export class AssessmentsService {
         elapsedMinutes > assessment.durationMinutes;
 
       const flagReasons = [
-        ...(timingCheck.isFlagged && timingCheck.flagReason ? [timingCheck.flagReason] : []),
+        ...(timingCheck.isFlagged && timingCheck.flagReason
+          ? [timingCheck.flagReason]
+          : []),
         ...(isOverDuration
           ? [
               `Melebihi batas waktu pengerjaan (${assessment!.durationMinutes} menit, selesai dalam ${Math.round(elapsedMinutes)} menit).`,
@@ -324,7 +331,9 @@ export class AssessmentsService {
     const profile = await this.findProfileByUserId(userId);
 
     const attempt = attemptId
-      ? await this.prisma.assessmentAttempt.findUnique({ where: { id: attemptId } })
+      ? await this.prisma.assessmentAttempt.findUnique({
+          where: { id: attemptId },
+        })
       : await this.prisma.assessmentAttempt.findFirst({
           where: { assessmentId, studentId: profile.id, status: 'SUBMITTED' },
           orderBy: { completedAt: 'desc' },
@@ -344,13 +353,22 @@ export class AssessmentsService {
       throw new BadRequestException('Attempt ini bukan untuk assessment ini.');
     }
     if (attempt.status !== 'SUBMITTED') {
-      throw new BadRequestException('Attempt ini belum disubmit, belum ada hasil.');
+      throw new BadRequestException(
+        'Attempt ini belum disubmit, belum ada hasil.',
+      );
     }
 
     const answers = await this.prisma.assessmentAnswer.findMany({
       where: { attemptId: attempt.id },
       include: {
-        question: { select: { id: true, questionText: true, difficulty: true, competencyId: true } },
+        question: {
+          select: {
+            id: true,
+            questionText: true,
+            difficulty: true,
+            competencyId: true,
+          },
+        },
       },
     });
 

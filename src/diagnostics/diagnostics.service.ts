@@ -62,7 +62,10 @@ export class DiagnosticsService {
       orderBy: { startedAt: 'desc' },
     });
 
-    if (latestAttempt?.status === 'SUBMITTED') {
+    if (
+      latestAttempt?.status === 'SUBMITTED' &&
+      !diagnosticTest.allowMultipleAttempts
+    ) {
       throw new ConflictException(
         'Kamu sudah menyelesaikan diagnostic test ini. Diagnostic test hanya bisa dikerjakan sekali -- hubungi guru/admin kalau butuh mengulang.',
       );
@@ -281,7 +284,9 @@ export class DiagnosticsService {
         elapsedMinutes > diagnosticTest.durationMinutes;
 
       const flagReasons = [
-        ...(timingCheck.isFlagged && timingCheck.flagReason ? [timingCheck.flagReason] : []),
+        ...(timingCheck.isFlagged && timingCheck.flagReason
+          ? [timingCheck.flagReason]
+          : []),
         ...(isOverDuration
           ? [
               `Melebihi batas waktu pengerjaan (${diagnosticTest!.durationMinutes} menit, selesai dalam ${Math.round(elapsedMinutes)} menit).`,

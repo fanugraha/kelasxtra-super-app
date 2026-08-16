@@ -535,4 +535,56 @@ describe('Diagnostics submission (e2e)', () => {
       expect(attempt!.status).toBe('SUBMITTED');
     });
   });
+
+  // ============================================================
+  // Regression test: DiagnosticTest.allowMultipleAttempts override.
+  // Field ini ditambahkan supaya cap 1x bisa dikonfigurasi per-test
+  // (forward-compat untuk Teacher Engine) tanpa migration lagi nanti --
+  // test ini membuktikan override-nya benar-benar berfungsi, bukan cuma
+  // ada di schema tapi tidak pernah dibaca service.
+  // ============================================================
+
+  describe('config: DiagnosticTest.allowMultipleAttempts=true melewati cap 1x', () => {
+    it('diagnostic test dengan allowMultipleAttempts=true -> siswa bisa attempt lagi TANPA perlu di-void', async () => {
+      await prisma.diagnosticTest.update({
+        where: { id: fixture.diagnosticTestId },
+        data: { allowMultipleAttempts: true },
+      });
+
+      try {
+        const student = await registerStudent(app, 'allow-multiple-attempts');
+
+        const firstStart = await request(app.getHttpServer())
+          .post(`/api/v1/diagnostics/${fixture.diagnosticTestId}/start`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .expect(201);
+
+        await request(app.getHttpServer())
+          .post(`/api/v1/diagnostics/${fixture.diagnosticTestId}/submit`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .send({
+            attemptId: firstStart.body.data.id,
+            answers: buildAllCorrectAnswers(),
+          })
+          .expect(201);
+
+        // Beda dengan default (409 di test 'business rule' di atas) --
+        // dengan allowMultipleAttempts=true ini HARUS 201, bukan ditolak,
+        // dan TANPA perlu void dulu.
+        const secondStart = await request(app.getHttpServer())
+          .post(`/api/v1/diagnostics/${fixture.diagnosticTestId}/start`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .expect(201);
+
+        expect(secondStart.body.data.id).not.toBe(firstStart.body.data.id);
+        expect(secondStart.body.data.attemptNumber).toBe(2);
+      } finally {
+        // Reset supaya tidak bocor ke test lain yang pakai fixture yang sama.
+        await prisma.diagnosticTest.update({
+          where: { id: fixture.diagnosticTestId },
+          data: { allowMultipleAttempts: false },
+        });
+      }
+    });
+  });
 });

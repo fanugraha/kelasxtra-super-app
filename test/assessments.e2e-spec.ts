@@ -168,7 +168,7 @@ describe('Assessments submission security (e2e)', () => {
   // Regression test untuk keputusan bisnis 16 Agustus 2026: assessment
   // BOLEH diulang (beda dari diagnostic) -- yang dibatasi cuma jedanya
   // (cooldown), bukan jumlahnya. Lihat komentar
-  // AssessmentsService.ATTEMPT_COOLDOWN_HOURS.
+  // AssessmentsService.DEFAULT_ATTEMPT_COOLDOWN_HOURS.
   // ============================================================
 
   describe('business rule: assessment boleh diulang tapi dengan cooldown', () => {
@@ -365,8 +365,12 @@ describe('Assessments submission security (e2e)', () => {
 
       expect(resultsRes.body.data.attempt.id).toBe(attemptId);
       expect(resultsRes.body.data.attempt.status).toBe('SUBMITTED');
-      expect(resultsRes.body.data.answers).toHaveLength(fixture.questions.length);
-      expect(resultsRes.body.data.competencySnapshots.length).toBeGreaterThan(0);
+      expect(resultsRes.body.data.answers).toHaveLength(
+        fixture.questions.length,
+      );
+      expect(resultsRes.body.data.competencySnapshots.length).toBeGreaterThan(
+        0,
+      );
     });
 
     it('belum pernah submit -> 404, bukan array kosong yang membingungkan', async () => {
@@ -395,7 +399,9 @@ describe('Assessments submission security (e2e)', () => {
         .expect(201);
 
       await request(app.getHttpServer())
-        .get(`/api/v1/assessments/${fixture.assessmentId}/results?attemptId=${attemptId}`)
+        .get(
+          `/api/v1/assessments/${fixture.assessmentId}/results?attemptId=${attemptId}`,
+        )
         .set('Authorization', `Bearer ${intruder.accessToken}`)
         .expect(403);
     });
@@ -407,6 +413,54 @@ describe('Assessments submission security (e2e)', () => {
         .get(`/api/v1/assessments/${fixture.assessmentId}/results`)
         .set('Authorization', `Bearer ${teacher.accessToken}`)
         .expect(403);
+    });
+  });
+
+  // ============================================================
+  // Regression test: Assessment.cooldownHours override. Sama alasannya
+  // dengan DiagnosticTest.allowMultipleAttempts -- field ini forward-compat
+  // untuk Teacher Engine, test ini membuktikan override-nya benar-benar
+  // dibaca service (bukan cuma ada di schema tanpa dipakai).
+  // ============================================================
+
+  describe('config: Assessment.cooldownHours override menggantikan default 24 jam', () => {
+    it('cooldownHours=0 -> attempt kedua langsung boleh tanpa nunggu', async () => {
+      await prisma.assessment.update({
+        where: { id: fixture.assessmentId },
+        data: { cooldownHours: 0 },
+      });
+
+      try {
+        const student = await registerStudent(app, 'cooldown-override');
+
+        const firstStart = await request(app.getHttpServer())
+          .post(`/api/v1/assessments/${fixture.assessmentId}/start`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .expect(201);
+
+        await request(app.getHttpServer())
+          .post(`/api/v1/assessments/${fixture.assessmentId}/submit`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .send({
+            attemptId: firstStart.body.data.id,
+            answers: buildAllCorrectAnswers(),
+          })
+          .expect(201);
+
+        // Beda dengan default 24 jam (409 di test 'business rule' di atas)
+        // -- dengan cooldownHours=0 ini HARUS 201, langsung boleh lagi.
+        const secondStart = await request(app.getHttpServer())
+          .post(`/api/v1/assessments/${fixture.assessmentId}/start`)
+          .set('Authorization', `Bearer ${student.accessToken}`)
+          .expect(201);
+
+        expect(secondStart.body.data.id).not.toBe(firstStart.body.data.id);
+      } finally {
+        await prisma.assessment.update({
+          where: { id: fixture.assessmentId },
+          data: { cooldownHours: null },
+        });
+      }
     });
   });
 });
