@@ -62,4 +62,22 @@ export class StudentsController {
     const goal = await this.studentsService.updateGoal(user.userId, id, dto);
     return { success: true, data: goal, message: 'Goal berhasil diperbarui' };
   }
+
+  @Get('me/competencies')
+  async getMyCompetencies(@CurrentUser() user: { userId: number }) {
+    const competencies = await this.studentsService.getMyCompetencies(user.userId);
+    return { success: true, data: competencies, message: 'Success' };
+  }
+
+  @Get('me/learning-path')
+  async getMyLearningPath(@CurrentUser() user: { userId: number }) {
+    const path = await this.studentsService.getMyLearningPath(user.userId);
+    return { success: true, data: path, message: 'Success' };
+  }
+
+  @Get('me/progress')
+  async getMyProgress(@CurrentUser() user: { userId: number }) {
+    const progress = await this.studentsService.getMyProgress(user.userId);
+    return { success: true, data: progress, message: 'Success' };
+  }
 }

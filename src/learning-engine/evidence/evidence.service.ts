@@ -56,8 +56,14 @@ export class EvidenceService {
         : Promise.resolve([]),
     ]);
 
+    // Return type eksplisit [number, X] di callback .map() -- tanpa ini,
+    // TypeScript kadang melebarkan (widen) array literal jadi tipe non-tuple
+    // saat dipakai sebagai argumen `new Map(...)`, yang memicu error
+    // "No overload matches this call" di real Prisma types (ini lolos dari
+    // pengecekan stub Prisma Client sebelumnya karena stub itu terlalu
+    // longgar/`any`, jadi bug tuple-widening ini tidak pernah kelihatan).
     const questionLookup = new Map<number, QuestionLookup>(
-      questions.map((q) => [
+      questions.map((q): [number, QuestionLookup] => [
         q.id,
         {
           competencyId: q.competencyId,
@@ -67,7 +73,7 @@ export class EvidenceService {
     );
 
     const optionLookup = new Map<number, OptionLookup>(
-      selectedOptions.map((o) => [
+      selectedOptions.map((o): [number, OptionLookup] => [
         o.id,
         { questionId: o.questionId, isCorrect: o.isCorrect },
       ]),

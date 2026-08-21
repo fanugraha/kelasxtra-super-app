@@ -6,7 +6,8 @@ export type AuditAction =
   | 'LOGIN_SUCCESS'
   | 'LOGIN_FAILED'
   | 'ACCOUNT_LOCKED'
-  | 'LOGOUT';
+  | 'LOGOUT'
+  | 'USER_STATUS_CHANGED';
 
 /**
  * Mencatat aktivitas keamanan penting (section 15 dokumen: "Audit aktivitas

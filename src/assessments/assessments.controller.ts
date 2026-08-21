@@ -14,12 +14,23 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AssessmentsService } from './assessments.service';
 import { SubmitAssessmentDto } from './dto/submit-assessment.dto';
+import { CreateAssessmentDto } from './dto/create-assessment.dto';
 
 @Controller('assessments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('STUDENT')
 export class AssessmentsController {
   constructor(private assessmentsService: AssessmentsService) {}
+
+  // Gap Phase 4: sebelumnya tidak ada cara sama sekali bikin assessment
+  // baru selain seed/fixture manual. TEACHER-only, cuma boleh assessment
+  // milik sendiri -- lihat komentar service.
+  @Post()
+  @Roles('TEACHER')
+  async create(@CurrentUser() user: { userId: number }, @Body() dto: CreateAssessmentDto) {
+    const assessment = await this.assessmentsService.createAssessment(user.userId, dto);
+    return { success: true, data: assessment, message: 'Assessment berhasil dibuat' };
+  }
 
   @Post(':id/start')
   async start(@CurrentUser() user: { userId: number }, @Param('id', ParseIntPipe) id: number) {

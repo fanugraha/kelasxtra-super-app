@@ -13,6 +13,8 @@ import { CompetencySnapshotService } from '../learning-engine/snapshots/competen
 import { LearningEngineConfigService } from '../learning-engine/config/learning-engine-config.service';
 import { LearningPathReconciler } from '../learning-engine/learning-path/learning-path-reconciler';
 import { SubmitDiagnosticDto } from './dto/submit-diagnostic.dto';
+import { CreateDiagnosticTestDto } from './dto/create-diagnostic-test.dto';
+import { detectSuspiciousTiming } from '../learning-engine/integrity/suspicious-timing-detector';
 
 @Injectable()
 export class DiagnosticsService {
@@ -35,7 +37,16 @@ export class DiagnosticsService {
     return profile;
   }
 
-  // Step 1 (start): buat attempt baru, status IN_PROGRESS.
+  // Keputusan bisnis (16 Agustus 2026): diagnostic test itu "titik awal"
+  // (starting point) buat learning path siswa, BUKAN latihan yang boleh
+  // diulang bebas -- kalau boleh diulang tanpa batas, siswa bisa "diagnostic
+  // shopping" (coba berkali-kali sampai dapat hasil yang menguntungkan).
+  // Assessment TIDAK kena aturan ini (lihat AssessmentsService) -- itu
+  // memang harus boleh diulang, beda peran dengan diagnostic.
+  //
+  // diagnosticTest.allowMultipleAttempts (default false) bisa override
+  // cap ini per-test tanpa migration/rewrite lagi -- lihat komentar di
+  // schema.prisma (forward-compat untuk Teacher Engine).
   async startAttempt(userId: number, diagnosticTestId: number) {
     const profile = await this.findProfileByUserId(userId);
 
@@ -45,6 +56,24 @@ export class DiagnosticsService {
 
     if (!diagnosticTest) {
       throw new NotFoundException('Diagnostic test tidak ditemukan.');
+    }
+
+    const latestAttempt = await this.prisma.diagnosticAttempt.findFirst({
+      where: { diagnosticTestId, studentId: profile.id },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    if (!diagnosticTest.allowMultipleAttempts && latestAttempt?.status === 'SUBMITTED') {
+      throw new ConflictException(
+        'Kamu sudah menyelesaikan diagnostic test ini. Diagnostic test hanya bisa dikerjakan sekali -- hubungi guru/admin kalau butuh mengulang.',
+      );
+    }
+
+    // Attempt lama masih IN_PROGRESS (mis. tab ditutup sebelum submit) --
+    // lanjutkan attempt yang sama, jangan bikin duplikat. Berlaku baik
+    // cap-nya aktif maupun tidak.
+    if (latestAttempt?.status === 'IN_PROGRESS') {
+      return latestAttempt;
     }
 
     const previousAttemptsCount = await this.prisma.diagnosticAttempt.count({
@@ -58,6 +87,69 @@ export class DiagnosticsService {
         attemptNumber: previousAttemptsCount + 1,
         status: 'IN_PROGRESS',
       },
+    });
+  }
+
+  // ADMIN/TEACHER only (ditegakkan di controller lewat @Roles). "Void"
+  // dipilih daripada delete supaya riwayat attempt asli tetap bisa
+  // ditelusuri -- siapa yang reset, kapan, dan alasannya apa.
+  async voidAttempt(actorUserId: number, attemptId: number, reason?: string) {
+    const attempt = await this.prisma.diagnosticAttempt.findUnique({
+      where: { id: attemptId },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Attempt tidak ditemukan.');
+    }
+
+    if (attempt.status === 'VOID') {
+      throw new ConflictException('Attempt ini sudah di-void sebelumnya.');
+    }
+
+    return this.prisma.diagnosticAttempt.update({
+      where: { id: attemptId },
+      data: {
+        status: 'VOID',
+        voidedAt: new Date(),
+        voidReason: reason,
+        voidedByUserId: actorUserId,
+      },
+    });
+  }
+
+  // Gap Phase 4 (19 Agustus 2026): sebelum ini TIDAK ADA endpoint sama
+  // sekali untuk membuat DiagnosticTest baru -- satu-satunya cara cuma
+  // lewat seed script manual. ADMIN-only karena DiagnosticTest tidak
+  // punya teacherId di schema (platform-level, bukan milik teacher
+  // tertentu) -- konsisten dengan section 5.4 dokumen master.
+  async createTest(dto: CreateDiagnosticTestDto) {
+    const subject = await this.prisma.subject.findUnique({ where: { id: dto.subjectId } });
+    if (!subject) {
+      throw new NotFoundException('Subject tidak ditemukan.');
+    }
+
+    const uniqueQuestionIds = [...new Set(dto.questionIds)];
+    const questions = await this.prisma.question.findMany({
+      where: { id: { in: uniqueQuestionIds } },
+    });
+    if (questions.length !== uniqueQuestionIds.length) {
+      throw new BadRequestException('Ada questionId yang tidak valid/tidak ditemukan.');
+    }
+
+    return this.prisma.diagnosticTest.create({
+      data: {
+        subjectId: dto.subjectId,
+        name: dto.name,
+        durationMinutes: dto.durationMinutes,
+        allowMultipleAttempts: dto.allowMultipleAttempts ?? false,
+        questions: {
+          create: uniqueQuestionIds.map((questionId, index) => ({
+            questionId,
+            sequence: index,
+          })),
+        },
+      },
+      include: { questions: true },
     });
   }
 
@@ -188,9 +280,49 @@ export class DiagnosticsService {
       const correctCount = enrichedAnswers.filter((a) => a.isCorrect).length;
       const overallScore = (correctCount / enrichedAnswers.length) * 100;
 
+      // Sesi 6: deteksi timing mencurigakan -- rule-based, murni fungsi,
+      // dievaluasi dari jawaban attempt ini saja.
+      const timingCheck = detectSuspiciousTiming(
+        enrichedAnswers.map((a) => ({ timeSpentSeconds: a.timeSpentSeconds })),
+      );
+
+      // Keputusan bisnis (16 Agustus 2026, item #3): durationMinutes DITEGAKKAN
+      // sebagai SOFT FLAG, bukan blokir keras -- attempt yang telat tetap
+      // diterima & tetap dihitung skornya (siswa tidak dihukum kalau
+      // internetnya lelet), tapi ditandai isFlagged supaya guru/admin bisa
+      // menilai sendiri lewat data, bukan lewat sistem yang menolak mentah-mentah.
+      const diagnosticTest = await tx.diagnosticTest.findUnique({
+        where: { id: diagnosticTestId },
+        select: { durationMinutes: true },
+      });
+      const elapsedMinutes = (Date.now() - attempt.startedAt.getTime()) / 60_000;
+      const isOverDuration =
+        diagnosticTest?.durationMinutes != null &&
+        elapsedMinutes > diagnosticTest.durationMinutes;
+
+      const flagReasons = [
+        ...(timingCheck.isFlagged && timingCheck.flagReason ? [timingCheck.flagReason] : []),
+        ...(isOverDuration
+          ? [
+              `Melebihi batas waktu pengerjaan (${diagnosticTest!.durationMinutes} menit, selesai dalam ${Math.round(elapsedMinutes)} menit).`,
+            ]
+          : []),
+      ];
+      const isFlagged = timingCheck.isFlagged || isOverDuration;
+
       const updatedAttempt = await tx.diagnosticAttempt.update({
         where: { id: attempt.id },
-        data: { score: overallScore, completedAt: new Date() },
+        data: {
+          score: overallScore,
+          completedAt: new Date(),
+          ...(isFlagged
+            ? {
+                isFlagged: true,
+                flagReason: flagReasons.join(' | '),
+                flaggedAt: new Date(),
+              }
+            : {}),
+        },
       });
 
       // 17. Return learning profile.

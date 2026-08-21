@@ -80,4 +80,62 @@ export class StudentsService {
       },
     });
   }
+
+  // Gap Phase 4 (19 Agustus 2026): mesin Learning Engine sudah nulis
+  // StudentCompetency/LearningPath/StudentProgress tiap kali submit, tapi
+  // sebelum ini TIDAK ADA satu pun endpoint buat siswa lihat hasilnya --
+  // section 12.3 dokumen master eksplisit minta 3 endpoint ini.
+
+  async getMyCompetencies(userId: number) {
+    const profile = await this.findProfileByUserId(userId);
+
+    return this.prisma.studentCompetency.findMany({
+      where: { studentId: profile.id },
+      include: {
+        competency: { include: { subject: true, topic: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  // Cuma path yang ACTIVE -- path lama yang sudah ARCHIVED/COMPLETED bukan
+  // "learning path saat ini". LearningPathReconciler juga cuma pernah
+  // menyentuh path ber-status ACTIVE (lihat getOrCreateActivePath).
+  async getMyLearningPath(userId: number) {
+    const profile = await this.findProfileByUserId(userId);
+
+    const path = await this.prisma.learningPath.findFirst({
+      where: { studentId: profile.id, status: 'ACTIVE' },
+      orderBy: { generatedAt: 'desc' },
+      include: {
+        items: {
+          orderBy: { sequence: 'asc' },
+          include: {
+            competency: true,
+            lesson: { include: { course: true } },
+          },
+        },
+      },
+    });
+
+    if (!path) {
+      throw new NotFoundException(
+        'Belum ada learning path -- biasanya baru terbentuk setelah ada competency yang butuh perhatian dari diagnostic/assessment.',
+      );
+    }
+
+    return path;
+  }
+
+  async getMyProgress(userId: number) {
+    const profile = await this.findProfileByUserId(userId);
+
+    return this.prisma.studentProgress.findMany({
+      where: { studentId: profile.id },
+      include: {
+        lesson: { include: { course: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
 }

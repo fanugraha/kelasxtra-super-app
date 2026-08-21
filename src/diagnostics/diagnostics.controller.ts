@@ -6,12 +6,22 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DiagnosticsService } from './diagnostics.service';
 import { SubmitDiagnosticDto } from './dto/submit-diagnostic.dto';
 import { VoidAttemptDto } from './dto/void-attempt.dto';
+import { CreateDiagnosticTestDto } from './dto/create-diagnostic-test.dto';
 
 @Controller('diagnostics')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('STUDENT')
 export class DiagnosticsController {
   constructor(private diagnosticsService: DiagnosticsService) {}
+
+  // Gap Phase 4: sebelumnya tidak ada cara sama sekali bikin diagnostic
+  // test baru selain seed manual. ADMIN-only -- lihat komentar service.
+  @Post()
+  @Roles('ADMIN')
+  async create(@Body() dto: CreateDiagnosticTestDto) {
+    const test = await this.diagnosticsService.createTest(dto);
+    return { success: true, data: test, message: 'Diagnostic test berhasil dibuat' };
+  }
 
   @Post(':id/start')
   async start(@CurrentUser() user: { userId: number }, @Param('id', ParseIntPipe) id: number) {

@@ -14,6 +14,12 @@ import { CompetenciesModule } from './competencies/competencies.module';
 import { CommonModule } from './common/common.module';
 import { DiagnosticsModule } from './diagnostics/diagnostics.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { QuestionBanksModule } from './question-banks/question-banks.module';
+import { QuestionsModule } from './questions/questions.module';
+import { CoursesModule } from './courses/courses.module';
+import { LessonsModule } from './lessons/lessons.module';
+import { MaterialsModule } from './materials/materials.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -40,6 +46,12 @@ import { AssessmentsModule } from './assessments/assessments.module';
     CompetenciesModule,
     DiagnosticsModule,
     AssessmentsModule,
+    QuestionBanksModule,
+    QuestionsModule,
+    CoursesModule,
+    LessonsModule,
+    MaterialsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
