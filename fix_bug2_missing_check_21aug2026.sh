@@ -1,3 +1,10 @@
+#!/bin/bash
+set -e
+echo ">> Fix: pengecekan duplicate questionId (Bug #2) hilang lagi dari diagnostics.service.ts di tengah beberapa kali rewrite -- exploit tetap tertahan (lapisan unique constraint di database masih jalan), tapi status code-nya salah (409 padahal seharusnya 400). Dikembalikan persis sama polanya dengan AssessmentsService."
+
+mkdir -p "$(dirname "src/diagnostics/diagnostics.service.ts")"
+echo ">> Menulis src/diagnostics/diagnostics.service.ts"
+cat > src/diagnostics/diagnostics.service.ts << 'KELASXTRA_FIX_BUG2_MISSING_CHECK_21AUG'
 import {
   BadRequestException,
   ConflictException,
@@ -347,3 +354,8 @@ export class DiagnosticsService {
     });
   }
 }
+KELASXTRA_FIX_BUG2_MISSING_CHECK_21AUG
+
+echo ""
+echo ">> Selesai. Tidak ada perubahan schema/DTO."
+echo "Langkah selanjutnya: npm run test:e2e"
