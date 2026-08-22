@@ -1,3 +1,10 @@
+#!/bin/bash
+set -e
+echo ">> Fix bug NYATA (bukan sekadar test): refresh token hashing pakai bcrypt yang cuma proses 72 byte pertama input -- JWT panjang (apalagi kalau email-nya panjang) sering punya 72 byte pertama IDENTIK antar token berbeda, bikin bcrypt.compare salah anggap token lama yang sudah di-revoke sebagai masih cocok. Diganti SHA-256 (proses seluruh input, deterministik, sekalian jadi lookup O(1) pakai index yang sudah ada, bukan loop O(n))."
+
+mkdir -p "$(dirname "src/auth/auth.service.ts")"
+echo ">> Menulis src/auth/auth.service.ts"
+cat > src/auth/auth.service.ts << 'KELASXTRA_FIX_REFRESH_HASH_SHA256_22AUG2026'
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'crypto';
@@ -230,3 +237,9 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 }
+KELASXTRA_FIX_REFRESH_HASH_SHA256_22AUG2026
+
+echo ""
+echo ">> Selesai. Tidak ada perubahan schema -- kolom tokenHash sudah cukup panjang buat hex SHA-256 (64 karakter)."
+echo "Langkah selanjutnya:"
+echo "1. npm run test:e2e"
